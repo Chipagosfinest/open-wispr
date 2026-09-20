@@ -33,7 +33,30 @@ func printUsage() {
 }
 
 func cmdStart() {
+    let instanceLock: DaemonInstanceLock
+    do {
+        guard let acquiredLock = try DaemonInstanceLock.acquire() else {
+            fputs("OpenWispr is already running.\n", stderr)
+            exit(0)
+        }
+        instanceLock = acquiredLock
+    } catch {
+        fputs("Error: could not acquire the OpenWispr instance lock: \(error.localizedDescription)\n", stderr)
+        exit(1)
+    }
+
     let app = NSApplication.shared
+    let terminationResult = LegacyInstanceTerminator.terminatePreviousInstances()
+    if terminationResult.foundCount > 0 {
+        print("Stopped \(terminationResult.foundCount) previous OpenWispr instance(s).")
+    }
+    if !terminationResult.remainingProcessIdentifiers.isEmpty {
+        let processList = terminationResult.remainingProcessIdentifiers
+            .map(String.init)
+            .joined(separator: ", ")
+        fputs("Could not stop previous OpenWispr process(es): \(processList).\n", stderr)
+        exit(0)
+    }
     app.setActivationPolicy(.accessory)
 
     let delegate = AppDelegate()
@@ -44,7 +67,9 @@ func cmdStart() {
         exit(0)
     }
 
-    app.run()
+    withExtendedLifetime(instanceLock) {
+        app.run()
+    }
 }
 
 func cmdSetHotkey(_ keyString: String) {
